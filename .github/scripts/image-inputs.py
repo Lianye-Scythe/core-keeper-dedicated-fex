@@ -6,7 +6,6 @@ import os
 import re
 import subprocess
 import sys
-import time
 
 LABEL = 'io.github.corekeeper.build-inputs'
 MIRROR = 'ports.ubuntu.com'
@@ -34,14 +33,28 @@ def arm_reference(ref):
 
 def mirror_mapping():
     # Use the hosted runner's resolver, without weakening BuildKit isolation or APT signatures.
-    for delay in (0, 2, 5):
-        time.sleep(delay)
-        try:
-            addresses = run('getent', 'ahostsv4', MIRROR, timeout=15)
-            return f'{MIRROR}={ipaddress.IPv4Address(addresses.split()[0])}'
-        except (subprocess.SubprocessError, IndexError, ValueError):
-            continue
-    raise ValueError(f'Hosted runner could not resolve {MIRROR}')
+    try:
+        addresses = run('getent', 'ahostsv4', MIRROR, timeout=8)
+        address = ipaddress.IPv4Address(addresses.split()[0])
+        if address.is_global:
+            return f'{MIRROR}={address}'
+    except (subprocess.SubprocessError, IndexError, ValueError):
+        pass
+    print(f'Runner DNS could not resolve {MIRROR}; trying HTTPS DNS for this host only.', flush=True)
+    response = json.loads(run('curl', '--fail', '--silent', '--show-error', '--retry', '2',
+                              '--retry-all-errors', '--max-time', '12',
+                              f'https://dns.google/resolve?name={MIRROR}&type=A', timeout=45))
+    if response.get('Status') == 0 and not response.get('TC'):
+        for record in response.get('Answer', []):
+            if record.get('name') != MIRROR + '.' or record.get('type') != 1:
+                continue
+            try:
+                address = ipaddress.IPv4Address(record.get('data'))
+            except ValueError:
+                continue
+            if address.is_global:
+                return f'{MIRROR}={address}'
+    raise ValueError(f'Neither runner DNS nor HTTPS DNS returned a public address for {MIRROR}')
 
 
 def fingerprint(inputs):

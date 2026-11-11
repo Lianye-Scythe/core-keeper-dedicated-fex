@@ -13,6 +13,19 @@ spec.loader.exec_module(inputs)
 
 
 class ImageInputsTests(unittest.TestCase):
+    def test_unavailable_runner_dns_uses_https_for_the_official_mirror_only(self):
+        answer = json.dumps({'Status': 0, 'Answer': [
+            {'name': 'ports.ubuntu.com.', 'type': 1, 'data': '127.0.0.1'},
+            {'name': 'different.example.', 'type': 1, 'data': '9.9.9.9'},
+            {'name': 'ports.ubuntu.com.', 'type': 1, 'data': '91.189.91.103'},
+        ]})
+        with patch.object(inputs, 'run', side_effect=[subprocess.TimeoutExpired('getent', 8), answer]):
+            self.assertEqual(inputs.mirror_mapping(), 'ports.ubuntu.com=91.189.91.103')
+
+    def test_failed_https_dns_does_not_supply_a_mirror(self):
+        with patch.object(inputs, 'run', side_effect=['', '{"Status": 2}']), self.assertRaises(ValueError):
+            inputs.mirror_mapping()
+
     def test_arm_manifest_excludes_other_platforms(self):
         amd, arm = ('sha256:' + c * 64 for c in 'ab')
         manifest = [dict(Descriptor=dict(digest=digest, platform=dict(os='linux', architecture=arch)))
