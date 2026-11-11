@@ -103,7 +103,7 @@ jobs:
           platforms: linux/arm64
           load: true
           tags: corekeeper-fex:check
-          add-hosts: ${{ steps.inputs.outputs.mirror }}
+          add-hosts: ${{ steps.inputs.outputs.hosts }}
           labels: io.github.corekeeper.build-inputs=${{ steps.inputs.outputs.fingerprint }}
           build-args: |
             APT_REFRESH_NONCE=${{ github.run_id }}-${{ github.run_attempt }}

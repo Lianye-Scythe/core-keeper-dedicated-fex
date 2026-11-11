@@ -77,8 +77,9 @@ build and publication when all inputs match. Manual runs build by default; enabl
 `check_for_changes` to use the same comparison. A failed check blocks publishing;
 it is not treated as unchanged. Publish a baseline with a manual build if a fork
 does not have a published `:fex` image yet. The required final check remains in place.
-If runner DNS fails, CI resolves only `ports.ubuntu.com` through HTTPS DNS as a
-fallback. APT still checks the original Ubuntu and FEX archive signatures.
+CI passes the runner's resolved addresses for its download endpoints into
+isolated build containers. If runner DNS fails, HTTPS DNS is used only for
+these endpoints. APT still checks the original Ubuntu and FEX archive signatures.
 CI smoke tests are not full game-session tests.
 
 Dependabot checks Docker/Actions daily; eligible patch/minor updates use

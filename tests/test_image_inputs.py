@@ -20,11 +20,19 @@ class ImageInputsTests(unittest.TestCase):
             {'name': 'ports.ubuntu.com.', 'type': 1, 'data': '91.189.91.103'},
         ]})
         with patch.object(inputs, 'run', side_effect=[subprocess.TimeoutExpired('getent', 8), answer]):
-            self.assertEqual(inputs.mirror_mapping(), 'ports.ubuntu.com=91.189.91.103')
+            self.assertEqual(inputs.host_mapping('ports.ubuntu.com'), 'ports.ubuntu.com=91.189.91.103')
 
     def test_failed_https_dns_does_not_supply_a_mirror(self):
         with patch.object(inputs, 'run', side_effect=['', '{"Status": 2}']), self.assertRaises(ValueError):
-            inputs.mirror_mapping()
+            inputs.host_mapping('ports.ubuntu.com')
+
+    def test_dns_fallback_follows_the_requested_hosts_cname(self):
+        answer = json.dumps({'Status': 0, 'Answer': [
+            {'name': 'api.launchpad.net.', 'type': 5, 'data': 'alias.example.'},
+            {'name': 'alias.example.', 'type': 1, 'data': '91.189.91.103'},
+        ]})
+        with patch.object(inputs, 'run', side_effect=['', answer]):
+            self.assertEqual(inputs.host_mapping('api.launchpad.net'), 'api.launchpad.net=91.189.91.103')
 
     def test_arm_manifest_excludes_other_platforms(self):
         amd, arm = ('sha256:' + c * 64 for c in 'ab')
@@ -36,7 +44,7 @@ class ImageInputsTests(unittest.TestCase):
     def test_new_inputs_build_without_pulling_the_baseline(self):
         with patch.object(inputs, 'arm_reference', return_value='image@sha256:old'), \
                 patch.object(inputs, 'run', return_value='{"config": {"Labels": null}}') as run:
-            self.assertTrue(inputs.build_required('image:fex', 'new', 'mirror=1.2.3.4')[0])
+            self.assertTrue(inputs.build_required('image:fex', 'new', ['mirror=1.2.3.4'])[0])
             self.assertEqual(run.call_count, 1)
 
     def test_same_static_inputs_build_only_if_apt_would_change_packages(self):
@@ -45,7 +53,7 @@ class ImageInputsTests(unittest.TestCase):
             with self.subTest(count=count), \
                     patch.object(inputs, 'arm_reference', return_value='image@sha256:old'), \
                     patch.object(inputs, 'run', side_effect=[json.dumps({'config': {'Labels': {inputs.LABEL: 'same'}}}), plan]) as run:
-                self.assertEqual(inputs.build_required('image:fex', 'same', 'mirror=1.2.3.4')[0], bool(count))
+                self.assertEqual(inputs.build_required('image:fex', 'same', ['mirror=1.2.3.4'])[0], bool(count))
                 self.assertIn('APT::Update::Error-Mode=any', run.call_args.args[-1])
                 self.assertIn('apt-get -s upgrade', run.call_args.args[-1])
 
@@ -56,4 +64,4 @@ class ImageInputsTests(unittest.TestCase):
             with self.subTest(result=result), \
                     patch.object(inputs, 'arm_reference', return_value='image@sha256:old'), \
                     patch.object(inputs, 'run', side_effect=[labels, result]), self.assertRaises(error):
-                inputs.build_required('image:fex', 'same', 'mirror=1.2.3.4')
+                inputs.build_required('image:fex', 'same', ['mirror=1.2.3.4'])
