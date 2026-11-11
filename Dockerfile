@@ -1,26 +1,31 @@
 # Native ARM64 host with an extracted x86-64 guest RootFS; no privileged mounts.
-FROM ubuntu:24.04 AS rootfs
+ARG ROOTFS_BASE=ubuntu:24.04
+ARG RUNTIME_BASE=ubuntu:26.04
+FROM ${ROOTFS_BASE} AS rootfs
 ARG APT_REFRESH_NONCE=manual
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get -o Acquire::Retries=3 -o APT::Update::Error-Mode=any update \
+    && apt-get install -y --no-install-recommends \
     ca-certificates curl jq squashfs-tools xxhash \
     && rm -rf /var/lib/apt/lists/*
 COPY fex/install-rootfs.sh /usr/local/bin/install-fex-rootfs
 RUN echo "Refreshing official RootFS manifest: ${APT_REFRESH_NONCE}" \
     && bash /usr/local/bin/install-fex-rootfs /opt/fex-rootfs
 
-FROM ubuntu:26.04
+FROM ${RUNTIME_BASE}
 ARG TARGETARCH
 ARG APT_REFRESH_NONCE=manual
 ARG DEPOT_DOWNLOADER_VERSION=3.4.0
 RUN test "${TARGETARCH}" = arm64
 ENV DEBIAN_FRONTEND=noninteractive
 RUN echo "Refreshing FEX packages: ${APT_REFRESH_NONCE}" \
-    && apt-get update && apt-get install -y --no-install-recommends \
+    && apt-get -o Acquire::Retries=3 -o APT::Update::Error-Mode=any update \
+    && apt-get install -y --no-install-recommends \
        ca-certificates software-properties-common curl python3 xvfb libxi6 tini \
        tzdata gosu jo jq gettext-base unzip wget libdbus-1-3 libxcursor1 \
        libxinerama1 libxss1 libgl1-mesa-dri libglx-mesa0 libegl1 libvulkan1 \
-    && add-apt-repository -y ppa:fex-emu/fex \
-    && apt-get update && apt-get install -y --no-install-recommends fex-emu-armv8.2 \
+    && add-apt-repository -yn ppa:fex-emu/fex \
+    && apt-get -o Acquire::Retries=3 -o APT::Update::Error-Mode=any update \
+    && apt-get install -y --no-install-recommends fex-emu-armv8.2 \
     && apt-get -o Dpkg::Options::="--force-confold" upgrade -y --with-new-pkgs \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=rootfs /opt/fex-rootfs /opt/fex-rootfs
