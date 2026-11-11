@@ -43,24 +43,30 @@ def host_mapping(host):
             return f'{host}={address}'
     except (subprocess.SubprocessError, IndexError, ValueError):
         pass
-    print(f'Runner DNS could not resolve {host}; trying HTTPS DNS for this host only.', flush=True)
-    response = json.loads(run('curl', '--fail', '--silent', '--show-error', '--retry', '2',
-                              '--retry-all-errors', '--max-time', '12',
-                              f'https://dns.google/resolve?name={host}&type=A', timeout=45))
-    if response.get('Status') == 0 and not response.get('TC'):
+    for resolver in ('https://dns.google/resolve', 'https://cloudflare-dns.com/dns-query'):
+        try:
+            response = json.loads(run('curl', '--fail', '--silent', '--show-error', '--max-time', '12',
+                                      '-H', 'accept: application/dns-json',
+                                      f'{resolver}?name={host}&type=A', timeout=15))
+        except (subprocess.SubprocessError, ValueError):
+            continue
+        if response.get('Status') != 0 or response.get('TC'):
+            continue
         answers = response.get('Answer', [])
-        aliases = {record['name']: record['data'] for record in answers if record.get('type') == 5}
-        name = host + '.'
+        aliases = {record['name'].rstrip('.').lower(): record['data'].rstrip('.').lower()
+                   for record in answers if record.get('type') == 5}
+        name = host
         for _ in range(len(aliases)):
             name = aliases.get(name, name)
         for record in answers:
-            if record.get('name') != name or record.get('type') != 1:
+            if record.get('name', '').rstrip('.').lower() != name or record.get('type') != 1:
                 continue
             try:
                 address = ipaddress.IPv4Address(record.get('data'))
             except ValueError:
                 continue
             if address.is_global:
+                print(f'Resolved {host} through {resolver} after runner DNS failed.', flush=True)
                 return f'{host}={address}'
     raise ValueError(f'Neither runner DNS nor HTTPS DNS returned a public address for {host}')
 
@@ -98,22 +104,28 @@ def build_required(ref, expected, apt_hosts):
 
 
 def main():
+    if sys.argv[1:] == ['--resolve-hosts']:
+        hosts = resolve_hosts(APT_HOSTS + BUILD_HOSTS)
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+            print(f'hosts={",".join(hosts)}', file=output)
+        return
     rootfs = arm_reference('docker.io/library/ubuntu:24.04')
     runtime = arm_reference('docker.io/library/ubuntu:26.04')
     guest = json.loads(run('bash', 'fex/install-rootfs.sh', '--metadata-only', timeout=300))
     source = run('git', 'ls-tree', '-r', 'HEAD', '--', *BUILD_FILES)
     expected = fingerprint([rootfs, runtime, guest, os.environ['DEPOT_VERSION'],
                             os.environ['DEPOT_ASSET'], source])
-    hosts = resolve_hosts(APT_HOSTS)
     changed, reason = True, 'source change or explicitly requested build'
     if os.environ['CHECK_INPUTS'] == 'true':
-        changed, reason = build_required(os.environ['IMAGE'].lower() + ':fex', expected, hosts)
-    if changed:
-        hosts += resolve_hosts(BUILD_HOSTS)
+        apt_hosts = [mapping for mapping in os.environ['RESOLVED_HOSTS'].split(',')
+                     if mapping.split('=', 1)[0] in APT_HOSTS]
+        if len(apt_hosts) != len(APT_HOSTS):
+            raise ValueError('Missing resolved addresses for Ubuntu/FEX APT sources')
+        changed, reason = build_required(os.environ['IMAGE'].lower() + ':fex', expected, apt_hosts)
     print(f'Image build required: {changed} ({reason})', flush=True)
     with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
         for key, value in dict(build=str(changed).lower(), fingerprint=expected,
-                               rootfs=rootfs, runtime=runtime, hosts=','.join(hosts),
+                               rootfs=rootfs, runtime=runtime,
                                guest_url=guest['URL'], guest_hash=guest['Hash']).items():
             print(f'{key}={value}', file=output)
 

@@ -23,8 +23,14 @@ class ImageInputsTests(unittest.TestCase):
             self.assertEqual(inputs.host_mapping('ports.ubuntu.com'), 'ports.ubuntu.com=91.189.91.103')
 
     def test_failed_https_dns_does_not_supply_a_mirror(self):
-        with patch.object(inputs, 'run', side_effect=['', '{"Status": 2}']), self.assertRaises(ValueError):
+        with patch.object(inputs, 'run', side_effect=['', '{"Status": 2}', '{"Status": 2}']), \
+                self.assertRaises(ValueError):
             inputs.host_mapping('ports.ubuntu.com')
+
+    def test_second_https_resolver_accepts_dns_names_without_trailing_dot(self):
+        answer = '{"Status":0,"Answer":[{"name":"ports.ubuntu.com","type":1,"data":"91.189.91.103"}]}'
+        with patch.object(inputs, 'run', side_effect=['', '{"Status": 2}', answer]):
+            self.assertEqual(inputs.host_mapping('ports.ubuntu.com'), 'ports.ubuntu.com=91.189.91.103')
 
     def test_dns_fallback_follows_the_requested_hosts_cname(self):
         answer = json.dumps({'Status': 0, 'Answer': [
