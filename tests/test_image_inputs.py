@@ -22,7 +22,7 @@ class ImageInputsTests(unittest.TestCase):
 
     def test_new_inputs_build_without_pulling_the_baseline(self):
         with patch.object(inputs, 'arm_reference', return_value='image@sha256:old'), \
-                patch.object(inputs, 'run', return_value='null') as run:
+                patch.object(inputs, 'run', return_value='{"config": {"Labels": null}}') as run:
             self.assertTrue(inputs.build_required('image:fex', 'new', 'mirror=1.2.3.4')[0])
             self.assertEqual(run.call_count, 1)
 
@@ -31,13 +31,13 @@ class ImageInputsTests(unittest.TestCase):
             plan = f'{count} upgraded, 0 newly installed, 0 to remove and 0 not upgraded.'
             with self.subTest(count=count), \
                     patch.object(inputs, 'arm_reference', return_value='image@sha256:old'), \
-                    patch.object(inputs, 'run', side_effect=[json.dumps({inputs.LABEL: 'same'}), plan]) as run:
+                    patch.object(inputs, 'run', side_effect=[json.dumps({'config': {'Labels': {inputs.LABEL: 'same'}}}), plan]) as run:
                 self.assertEqual(inputs.build_required('image:fex', 'same', 'mirror=1.2.3.4')[0], bool(count))
                 self.assertIn('APT::Update::Error-Mode=any', run.call_args.args[-1])
                 self.assertIn('apt-get -s upgrade', run.call_args.args[-1])
 
     def test_failed_or_unrecognizable_apt_check_cannot_skip_build(self):
-        labels = json.dumps({inputs.LABEL: 'same'})
+        labels = json.dumps({'config': {'Labels': {inputs.LABEL: 'same'}}})
         for result, error in ((subprocess.CalledProcessError(100, 'apt-get'), subprocess.CalledProcessError),
                               ('No plan', ValueError)):
             with self.subTest(result=result), \

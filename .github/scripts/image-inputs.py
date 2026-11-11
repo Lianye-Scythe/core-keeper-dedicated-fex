@@ -50,8 +50,9 @@ def fingerprint(inputs):
 
 def build_required(ref, expected, mirror):
     image = arm_reference(ref)
-    labels = json.loads(run('docker', 'buildx', 'imagetools', 'inspect', image,
-                            '--format', '{{json .Image.config.Labels}}')) or {}
+    config = json.loads(run('docker', 'buildx', 'imagetools', 'inspect', image,
+                            '--format', '{{json .Image}}'))
+    labels = config['config'].get('Labels') or {}
     if labels.get(LABEL) != expected:
         return True, 'base, RootFS, downloader or build inputs changed (or no baseline yet)'
     # Use the exact installed package set and the same upgrade policy as the Dockerfile.
