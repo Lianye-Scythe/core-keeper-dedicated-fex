@@ -3,7 +3,7 @@ ARG ROOTFS_BASE=ubuntu:24.04
 ARG RUNTIME_BASE=ubuntu:26.04
 FROM ${ROOTFS_BASE} AS rootfs
 ARG APT_REFRESH_NONCE=manual
-RUN apt-get -o Acquire::Retries=3 -o APT::Update::Error-Mode=any update \
+RUN apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o APT::Update::Error-Mode=any update \
     && apt-get install -y --no-install-recommends \
     ca-certificates curl jq squashfs-tools xxhash \
     && rm -rf /var/lib/apt/lists/*
@@ -17,14 +17,16 @@ ARG APT_REFRESH_NONCE=manual
 ARG DEPOT_DOWNLOADER_VERSION=3.4.0
 RUN test "${TARGETARCH}" = arm64
 ENV DEBIAN_FRONTEND=noninteractive
+COPY fex/fex-ppa.sources /tmp/fex-ppa.sources
 RUN echo "Refreshing FEX packages: ${APT_REFRESH_NONCE}" \
-    && apt-get -o Acquire::Retries=3 -o APT::Update::Error-Mode=any update \
+    && apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o APT::Update::Error-Mode=any update \
     && apt-get install -y --no-install-recommends \
-       ca-certificates software-properties-common curl python3 xvfb libxi6 tini \
+       ca-certificates curl python3 xvfb libxi6 tini \
        tzdata gosu jo jq gettext-base unzip wget libdbus-1-3 libxcursor1 \
        libxinerama1 libxss1 libgl1-mesa-dri libglx-mesa0 libegl1 libvulkan1 \
-    && add-apt-repository -yn ppa:fex-emu/fex \
-    && apt-get -o Acquire::Retries=3 -o APT::Update::Error-Mode=any update \
+    && mv /tmp/fex-ppa.sources /etc/apt/sources.list.d/fex-ppa.sources \
+    && apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 \
+       -o APT::Update::Error-Mode=any update \
     && apt-get install -y --no-install-recommends fex-emu-armv8.2 \
     && apt-get -o Dpkg::Options::="--force-confold" upgrade -y --with-new-pkgs \
     && rm -rf /var/lib/apt/lists/*

@@ -80,6 +80,9 @@ does not have a published `:fex` image yet. The required final check remains in 
 CI resolves its download endpoints on the x64 dependency runner and passes the
 addresses into isolated ARM64 builds. If runner DNS fails, HTTPS DNS is used only for
 these endpoints. APT still checks the original Ubuntu and FEX archive signatures.
+The official FEX PPA source carries its scoped public signing key in
+`fex-ppa.sources`, so adding it does not depend on the Launchpad API. Review any
+upstream key rotation before replacing the key; don't bypass signature checks.
 CI smoke tests are not full game-session tests.
 
 Dependabot checks Docker/Actions daily; eligible patch/minor updates use

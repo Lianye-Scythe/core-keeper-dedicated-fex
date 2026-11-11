@@ -10,10 +10,10 @@ import sys
 
 LABEL = 'io.github.corekeeper.build-inputs'
 APT_HOSTS = ('ports.ubuntu.com', 'ppa.launchpadcontent.net')
-BUILD_HOSTS = ('api.launchpad.net', 'rootfs.fex-emu.gg', 'github.com',
+BUILD_HOSTS = ('rootfs.fex-emu.gg', 'github.com',
                'release-assets.githubusercontent.com')
 BUILD_FILES = ('Dockerfile', '.dockerignore', 'scripts', 'fex/install-rootfs.sh',
-               'fex/steam-build.sh', '.github/scripts/image-inputs.py',
+               'fex/steam-build.sh', 'fex/fex-ppa.sources', '.github/scripts/image-inputs.py',
                '.github/workflows/docker-image.yml', 'tests/fex-image-smoke.sh',
                'tests/entry-smoke.sh', 'tests/setup-stub.sh')
 
@@ -93,7 +93,8 @@ def build_required(ref, expected, apt_hosts):
     plan = run('docker', 'run', '--rm', '--platform', 'linux/arm64', '--user', '0:0',
                *extra_hosts, '--entrypoint', 'bash', image, '-ec',
                'export LC_ALL=C; '
-               'apt-get -o Acquire::Retries=3 -o APT::Update::Error-Mode=any update >&2; '
+               'apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 '
+               '-o APT::Update::Error-Mode=any update >&2; '
                'apt-get -s upgrade --with-new-pkgs', timeout=600)
     summary = re.search(r'^(\d+) upgraded, (\d+) newly installed, (\d+) to remove and \d+ not upgraded\.$',
                         plan, re.MULTILINE)
