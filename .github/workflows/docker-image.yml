@@ -8,6 +8,11 @@ on:
   schedule:
     - cron: '37 6 * * *'
   workflow_dispatch:
+    inputs:
+      check_for_changes:
+        description: Skip the build when published image inputs are unchanged
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -50,16 +55,27 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       depot: ${{ steps.depot.outputs.version }}
+      asset: ${{ steps.depot.outputs.asset }}
+      hosts: ${{ steps.dns.outputs.hosts }}
     steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Resolve existing build download hosts on x64
+        id: dns
+        run: python3 -B .github/scripts/image-inputs.py --resolve-hosts
       - name: Read latest non-prerelease DepotDownloader
         id: depot
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          version=$(gh api repos/SteamRE/DepotDownloader/releases/latest --jq .tag_name)
+          release=$(gh api repos/SteamRE/DepotDownloader/releases/latest)
+          version=$(jq -er .tag_name <<< "$release")
           version=${version#DepotDownloader_}
           [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          asset=$(jq -er '[.assets[] | select(.name == "DepotDownloader-linux-arm64.zip") | .id]
+            | if length == 1 then .[0] else error("Missing or ambiguous ARM64 asset") end' <<< "$release")
+          [[ $asset =~ ^[0-9]+$ ]]
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
   image:
     name: Build FEX ARM64 image
     needs: [changes, lint, releases]
@@ -67,14 +83,25 @@ jobs:
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: docker/setup-buildx-action@v4.4.1
       - uses: docker/login-action@v4.6.0
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check ARM64 image inputs
+        id: inputs
+        env:
+          IMAGE: ghcr.io/${{ vars.IMAGE_REPOSITORY || github.repository }}
+          CHECK_INPUTS: ${{ github.event_name == 'schedule' || inputs.check_for_changes == true }}
+          DEPOT_VERSION: ${{ needs.releases.outputs.depot }}
+          DEPOT_ASSET: ${{ needs.releases.outputs.asset }}
+          RESOLVED_HOSTS: ${{ needs.releases.outputs.hosts }}
+        run: python3 -B .github/scripts/image-inputs.py
+      - uses: docker/setup-buildx-action@v4.4.1
+        if: steps.inputs.outputs.build == 'true'
       - name: Build (no publication before smoke test)
+        if: steps.inputs.outputs.build == 'true'
         uses: docker/build-push-action@v7.4.0
         with:
           context: .
@@ -82,20 +109,31 @@ jobs:
           platforms: linux/arm64
           load: true
           tags: corekeeper-fex:check
+          add-hosts: ${{ needs.releases.outputs.hosts }}
+          labels: io.github.corekeeper.build-inputs=${{ steps.inputs.outputs.fingerprint }}
           build-args: |
-            APT_REFRESH_NONCE=${{ github.run_id }}
+            APT_REFRESH_NONCE=${{ github.run_id }}-${{ github.run_attempt }}
+            ROOTFS_BASE=${{ steps.inputs.outputs.rootfs }}
+            RUNTIME_BASE=${{ steps.inputs.outputs.runtime }}
             DEPOT_DOWNLOADER_VERSION=${{ needs.releases.outputs.depot }}
           cache-from: type=gha,scope=fex
           cache-to: type=gha,scope=fex,mode=max
       - name: Native guest and entry smoke tests
+        if: steps.inputs.outputs.build == 'true'
+        env:
+          GUEST_URL: ${{ steps.inputs.outputs.guest_url }}
+          GUEST_HASH: ${{ steps.inputs.outputs.guest_hash }}
         run: |
+          docker run --rm --network none --entrypoint cat corekeeper-fex:check \
+            /opt/fex-rootfs-source.json | jq -e --arg url "$GUEST_URL" --arg hash "$GUEST_HASH" \
+            '.source.URL == $url and .source.Hash == $hash' >/dev/null
           docker run --rm --network none --entrypoint bash -v "$PWD:/test-repo:ro" \
             corekeeper-fex:check /test-repo/tests/fex-image-smoke.sh
           docker run --rm --network none --entrypoint bash -v "$PWD:/test-repo:ro" \
             -v "$PWD/tests/setup-stub.sh:/home/steam/scripts/setup.sh:ro" \
             corekeeper-fex:check /test-repo/tests/entry-smoke.sh
       - name: Publish tested FEX image (main only)
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: steps.inputs.outputs.build == 'true' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:
           # Existing public GHCR package remains linked after repository rename.
           # Other forks default to their own repository; this project sets the var.
@@ -130,7 +168,7 @@ jobs:
             true)
               test "$RELEASES_RESULT" = success
               test "$IMAGE_RESULT" = success
-              echo "Image build and smoke tests passed."
+              echo "Image checks passed (tested build or unchanged scheduled inputs)."
               ;;
             false)
               test "$RELEASES_RESULT" = skipped

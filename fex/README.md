@@ -9,7 +9,7 @@ and [maintenance](../docs/maintenance.md) guides for operational details.
 
 - `ghcr.io/lianye-scythe/core-keeper-dedicated:fex`: recommended update channel.
 - `:latest`: identical FEX/ARM64 channel, not the previous Box64 image.
-- `:fex-<commit>`: source revision label, **not immutable** across daily rebuilds.
+- `:fex-<commit>`: source revision label, **not immutable** across dependency rebuilds.
 - `@sha256:<digest>`: immutable image reference for reproducibility and rollback.
 
 For older deployments, review the [migration guide](../docs/migration.md).
@@ -63,14 +63,26 @@ from the image and are not enabled simply by pulling a new image.
 
 ## Build and dependency policy
 
-Daily CI checks the latest stable, non-prerelease DepotDownloader release,
-refreshes FEX/APT and the official RootFS manifest, runs shell/unit checks and
-native ARM64 guest/ownership smoke tests, then publishes **only from `main`**.
+Daily CI compares the ARM64 Ubuntu base digests, official guest RootFS manifest,
+stable DepotDownloader release/asset and image build inputs with the last
+published image. If those match, it refreshes signed APT indices in a disposable
+copy of that image and simulates upgrades for the installed Ubuntu/FEX packages.
+It does not install packages during this check. Shell/unit checks still run;
+changed inputs trigger a build and native ARM64 guest/ownership smoke tests.
+Tested images are published **only from `main`**.
 PRs test without publishing. Known documentation-only changes run shell/unit
 checks but skip dependency resolution, image builds and publication. Runtime,
-test, workflow and unknown file changes still build; daily scheduled and manual
-runs always build. An always-running final check validates either a successful
-build or a documentation-only skip without changing branch protection.
+test, workflow and unknown file changes still build. Scheduled checks skip the
+build and publication when all inputs match. Manual runs build by default; enable
+`check_for_changes` to use the same comparison. A failed check blocks publishing;
+it is not treated as unchanged. Publish a baseline with a manual build if a fork
+does not have a published `:fex` image yet. The required final check remains in place.
+CI resolves its download endpoints on the x64 dependency runner and passes the
+addresses into isolated ARM64 builds. If runner DNS fails, HTTPS DNS is used only for
+these endpoints. APT still checks the original Ubuntu and FEX archive signatures.
+The official FEX PPA source carries its scoped public signing key in
+`fex-ppa.sources`, so adding it does not depend on the Launchpad API. Review any
+upstream key rotation before replacing the key; don't bypass signature checks.
 CI smoke tests are not full game-session tests.
 
 Dependabot checks Docker/Actions daily; eligible patch/minor updates use

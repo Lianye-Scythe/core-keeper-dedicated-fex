@@ -1,0 +1,73 @@
+"""Regression checks for the scheduled build decision, with no registry writes."""
+import importlib.util
+import json
+from pathlib import Path
+import subprocess
+import unittest
+from unittest.mock import patch
+
+spec = importlib.util.spec_from_file_location(
+    'image_inputs', Path(__file__).resolve().parents[1] / '.github/scripts/image-inputs.py')
+inputs = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(inputs)
+
+
+class ImageInputsTests(unittest.TestCase):
+    def test_unavailable_runner_dns_uses_https_for_the_official_mirror_only(self):
+        answer = json.dumps({'Status': 0, 'Answer': [
+            {'name': 'ports.ubuntu.com.', 'type': 1, 'data': '127.0.0.1'},
+            {'name': 'different.example.', 'type': 1, 'data': '9.9.9.9'},
+            {'name': 'ports.ubuntu.com.', 'type': 1, 'data': '91.189.91.103'},
+        ]})
+        with patch.object(inputs, 'run', side_effect=[subprocess.TimeoutExpired('getent', 8), answer]):
+            self.assertEqual(inputs.host_mapping('ports.ubuntu.com'), 'ports.ubuntu.com=91.189.91.103')
+
+    def test_failed_https_dns_does_not_supply_a_mirror(self):
+        with patch.object(inputs, 'run', side_effect=['', '{"Status": 2}', '{"Status": 2}']), \
+                self.assertRaises(ValueError):
+            inputs.host_mapping('ports.ubuntu.com')
+
+    def test_second_https_resolver_accepts_dns_names_without_trailing_dot(self):
+        answer = '{"Status":0,"Answer":[{"name":"ports.ubuntu.com","type":1,"data":"91.189.91.103"}]}'
+        with patch.object(inputs, 'run', side_effect=['', '{"Status": 2}', answer]):
+            self.assertEqual(inputs.host_mapping('ports.ubuntu.com'), 'ports.ubuntu.com=91.189.91.103')
+
+    def test_dns_fallback_follows_the_requested_hosts_cname(self):
+        answer = json.dumps({'Status': 0, 'Answer': [
+            {'name': 'api.launchpad.net.', 'type': 5, 'data': 'alias.example.'},
+            {'name': 'alias.example.', 'type': 1, 'data': '91.189.91.103'},
+        ]})
+        with patch.object(inputs, 'run', side_effect=['', answer]):
+            self.assertEqual(inputs.host_mapping('api.launchpad.net'), 'api.launchpad.net=91.189.91.103')
+
+    def test_arm_manifest_excludes_other_platforms(self):
+        amd, arm = ('sha256:' + c * 64 for c in 'ab')
+        manifest = [dict(Descriptor=dict(digest=digest, platform=dict(os='linux', architecture=arch)))
+                    for arch, digest in [('amd64', amd), ('arm64', arm)]]
+        with patch.object(inputs, 'run', return_value=json.dumps(manifest)):
+            self.assertEqual(inputs.arm_reference('ubuntu:26.04'), 'ubuntu@' + arm)
+
+    def test_new_inputs_build_without_pulling_the_baseline(self):
+        with patch.object(inputs, 'arm_reference', return_value='image@sha256:old'), \
+                patch.object(inputs, 'run', return_value='{"config": {"Labels": null}}') as run:
+            self.assertTrue(inputs.build_required('image:fex', 'new', ['mirror=1.2.3.4'])[0])
+            self.assertEqual(run.call_count, 1)
+
+    def test_same_static_inputs_build_only_if_apt_would_change_packages(self):
+        for count in (0, 1):
+            plan = f'{count} upgraded, 0 newly installed, 0 to remove and 0 not upgraded.'
+            with self.subTest(count=count), \
+                    patch.object(inputs, 'arm_reference', return_value='image@sha256:old'), \
+                    patch.object(inputs, 'run', side_effect=[json.dumps({'config': {'Labels': {inputs.LABEL: 'same'}}}), plan]) as run:
+                self.assertEqual(inputs.build_required('image:fex', 'same', ['mirror=1.2.3.4'])[0], bool(count))
+                self.assertIn('APT::Update::Error-Mode=any', run.call_args.args[-1])
+                self.assertIn('apt-get -s upgrade', run.call_args.args[-1])
+
+    def test_failed_or_unrecognizable_apt_check_cannot_skip_build(self):
+        labels = json.dumps({'config': {'Labels': {inputs.LABEL: 'same'}}})
+        for result, error in ((subprocess.CalledProcessError(100, 'apt-get'), subprocess.CalledProcessError),
+                              ('No plan', ValueError)):
+            with self.subTest(result=result), \
+                    patch.object(inputs, 'arm_reference', return_value='image@sha256:old'), \
+                    patch.object(inputs, 'run', side_effect=[labels, result]), self.assertRaises(error):
+                inputs.build_required('image:fex', 'same', ['mirror=1.2.3.4'])
