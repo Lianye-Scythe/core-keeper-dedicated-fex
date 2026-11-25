@@ -2,14 +2,14 @@
 ARG ROOTFS_BASE=ubuntu:24.04
 ARG RUNTIME_BASE=ubuntu:26.04
 FROM ${ROOTFS_BASE} AS rootfs
-ARG APT_REFRESH_NONCE=manual
 RUN apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o APT::Update::Error-Mode=any update \
     && apt-get install -y --no-install-recommends \
     ca-certificates curl jq squashfs-tools xxhash \
     && rm -rf /var/lib/apt/lists/*
 COPY fex/install-rootfs.sh /usr/local/bin/install-fex-rootfs
-RUN echo "Refreshing official RootFS manifest: ${APT_REFRESH_NONCE}" \
-    && bash /usr/local/bin/install-fex-rootfs /opt/fex-rootfs
+ARG GUEST_ROOTFS_URL
+ARG GUEST_ROOTFS_HASH
+RUN bash /usr/local/bin/install-fex-rootfs /opt/fex-rootfs
 
 FROM ${RUNTIME_BASE}
 ARG TARGETARCH
