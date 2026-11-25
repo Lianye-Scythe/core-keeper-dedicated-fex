@@ -16,6 +16,12 @@ if [[ "${destination}" == --metadata-only ]]; then
     jq -c '{URL,Hash}' <<<"${selection}"
     exit 0
 fi
+# CI keys the extraction layer on the manifest entry it checked before building.
+if [[ -n "${GUEST_ROOTFS_URL:-}${GUEST_ROOTFS_HASH:-}" ]] &&
+    [[ "${url}" != "${GUEST_ROOTFS_URL:-}" || "${hash}" != "${GUEST_ROOTFS_HASH:-}" ]]; then
+    echo "RootFS manifest changed since input resolution; retry the build." >&2
+    exit 1
+fi
 curl --fail --location --retry 3 --connect-timeout 15 --max-time 1200 \
     "${url}" -o /tmp/fex-rootfs.sqsh
 expected="$(printf '%016x' "0x${hash}")"

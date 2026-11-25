@@ -69,6 +69,9 @@ published image. If those match, it refreshes signed APT indices in a disposable
 copy of that image and simulates upgrades for the installed Ubuntu/FEX packages.
 It does not install packages during this check. Shell/unit checks still run;
 changed inputs trigger a build and native ARM64 guest/ownership smoke tests.
+CI keys the guest RootFS extraction cache on its official URL and hash. A change
+to the extraction script or its base image also invalidates that layer. Runtime
+APT upgrades can reuse the verified guest filesystem across builds.
 Tested images are published **only from `main`**.
 PRs test without publishing. Known documentation-only changes run shell/unit
 checks but skip dependency resolution, image builds and publication. Runtime,

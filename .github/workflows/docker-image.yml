@@ -113,6 +113,8 @@ jobs:
           labels: io.github.corekeeper.build-inputs=${{ steps.inputs.outputs.fingerprint }}
           build-args: |
             APT_REFRESH_NONCE=${{ github.run_id }}-${{ github.run_attempt }}
+            GUEST_ROOTFS_URL=${{ steps.inputs.outputs.guest_url }}
+            GUEST_ROOTFS_HASH=${{ steps.inputs.outputs.guest_hash }}
             ROOTFS_BASE=${{ steps.inputs.outputs.rootfs }}
             RUNTIME_BASE=${{ steps.inputs.outputs.runtime }}
             DEPOT_DOWNLOADER_VERSION=${{ needs.releases.outputs.depot }}
